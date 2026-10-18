@@ -1,0 +1,97 @@
+---
+title: "Practical Machine Learning: Prediction Assignment Writeup"
+author: "Coursera Learner"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Executive Summary
+
+Using devices such as *Jawbone Up*, *Nike FuelBand*, and *Fitbit*, it is now possible to collect a large amount of data about personal activity relatively inexpensively. In this project, our goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they performed the exercise (`classe` variable). We build and evaluate a **Random Forest** prediction model using 5-fold cross-validation.
+
+## Data Loading and Preprocessing
+
+```r
+library(caret)
+library(randomForest)
+
+set.seed(12345)
+
+train_url <- "[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)"
+test_url  <- "[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)"
+
+# Load datasets treating blanks and error strings as NA
+training_raw <- read.csv(train_url, na.strings = c("NA", "#DIV/0!", ""))
+testing_raw  <- read.csv(test_url,  na.strings = c("NA", "#DIV/0!", ""))
+
+training_raw$classe <- as.factor(training_raw$classe)
+```
+
+### Data Cleaning
+
+We remove columns containing mostly missing values, non-predictive metadata (IDs and timestamps), and near-zero variance predictors.
+
+```r
+# Remove columns with >60% missing values
+na_threshold <- 0.6 * nrow(training_raw)
+cols_to_keep <- colSums(is.na(training_raw)) < na_threshold
+training_clean <- training_raw[, cols_to_keep]
+testing_clean  <- testing_raw[, cols_to_keep]
+
+# Remove identification/timestamp columns (first 7)
+training_clean <- training_clean[, -(1:7)]
+testing_clean  <- testing_clean[, -(1:7)]
+
+# Remove near-zero variance variables
+nzv <- nearZeroVar(training_clean)
+if(length(nzv) > 0) {
+  training_clean <- training_clean[, -nzv]
+  testing_clean  <- testing_clean[, -nzv]
+}
+```
+
+## Cross-Validation Setup & Model Training
+
+We split the cleaned training data into a **70% training set** and a **30% validation set**. Cross-validation is set up with 5 folds within the training process.
+
+```r
+inTrain <- createDataPartition(y = training_clean$classe, p = 0.70, list = FALSE)
+train_set <- training_clean[inTrain, ]
+valid_set <- training_clean[-inTrain, ]
+
+# Set 5-fold cross-validation
+train_control <- trainControl(method = "cv", number = 5, verboseIter = FALSE)
+
+# Train Random Forest
+rf_model <- train(classe ~ ., data = train_set, method = "rf", trControl = train_control)
+```
+
+## Out-of-Sample Error Evaluation
+
+We evaluate the trained model on our validation dataset to estimate performance.
+
+```r
+predictions_valid <- predict(rf_model, newdata = valid_set)
+conf_matrix <- confusionMatrix(predictions_valid, valid_set$classe)
+conf_matrix
+```
+
+```r
+accuracy <- conf_matrix$overall['Accuracy']
+out_of_sample_error <- 1 - accuracy
+```
+
+The model achieved an accuracy of **`r round(accuracy * 100, 2)`%** on the validation set. Consequently, the estimated **out-of-sample error** is **`r round(out_of_sample_error * 100, 2)`%**, demonstrating high predictive quality.
+
+## Final Quiz Predictions
+
+Finally, we apply our trained Random Forest model to predict the 20 test cases.
+
+```r
+final_predictions <- predict(rf_model, newdata = testing_clean)
+final_predictions
+```
